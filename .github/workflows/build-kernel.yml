@@ -266,9 +266,13 @@ jobs:
           EOF_SCHED
 
           echo "=== 3. Disable Vendor Schedulers (WALT, PELT, CORE_CTL) ==="
-          sed -i 's/CONFIG_SCHED_WALT=y/# CONFIG_SCHED_WALT is not set/g' arch/arm64/configs/gki_defconfig
-          sed -i 's/CONFIG_PELT_MULTIPLIER=y/# CONFIG_PELT_MULTIPLIER is not set/g' arch/arm64/configs/gki_defconfig
-          sed -i 's/CONFIG_SCHED_CORE_CTL=y/# CONFIG_SCHED_CORE_CTL is not set/g' arch/arm64/configs/gki_defconfig
+          sed -i '/CONFIG_SCHED_WALT/d' arch/arm64/configs/gki_defconfig
+          sed -i '/CONFIG_PELT_MULTIPLIER/d' arch/arm64/configs/gki_defconfig
+          sed -i '/CONFIG_SCHED_CORE_CTL/d' arch/arm64/configs/gki_defconfig
+          echo "# CONFIG_SCHED_WALT is not set" >> arch/arm64/configs/gki_defconfig
+          echo "# CONFIG_PELT_MULTIPLIER is not set" >> arch/arm64/configs/gki_defconfig
+          echo "# CONFIG_SCHED_CORE_CTL is not set" >> arch/arm64/configs/gki_defconfig
+
 
           echo "=== 4. Advanced Python Engine: Inject Cool & Casual Tuning ==="
           python3 - << 'EOF'
