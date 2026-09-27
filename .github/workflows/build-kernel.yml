@@ -121,7 +121,6 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-
       - name: Clone Kernel Source
         run: |
           mkdir -p work
@@ -132,6 +131,47 @@ jobs:
             git checkout ${{ env.KERNEL_COMMIT }}
           fi
 
+      - name: Purge le9uo commits (MGLRU Preparation)
+        run: |
+          cd work/common
+          echo "=== 1. Dynamically Finding and Reverting all le9uo commits ==="
+          
+          LE9UO_COMMITS=$(git log --grep="le9uo" -i --format="%H")
+          
+          if [ -n "$LE9UO_COMMITS" ]; then
+            echo "Found le9uo commits:"
+            echo "$LE9UO_COMMITS"
+            
+            for commit in $LE9UO_COMMITS; do
+              echo "-> Reverting: $commit"
+              if ! git revert --no-commit "$commit"; then
+                echo "⚠️ Conflict detected on $commit, checking conflicted files..."
+                for conf in arch/arm64/configs/gki_defconfig arch/arm64/configs/*defconfig; do
+                  if [ -f "$conf" ]; then
+                    git checkout HEAD -- "$conf" 2>/dev/null || true
+                    git add "$conf" 2>/dev/null || true
+                  fi
+                done
+
+                if git diff --name-only --diff-filter=U | grep -q .; then
+                  echo "⚠️ Unresolvable code conflict on $commit! Aborting this specific revert..."
+                  git revert --abort
+                else
+                  echo "✅ Defconfig conflict auto-resolved for $commit"
+                fi
+              fi
+            done
+            
+            git commit -m "chore: Purge le9uo commits for MGLRU" || true
+            echo "✅ le9uo commits successfully reverted!"
+          else
+            echo "✅ No le9uo commits found!"
+          fi
+
+          echo "=== 2. Hard Purge Leftover Kconfig Strings (Failsafe) ==="
+          sed -i '/config CLEAN_LOW_RATIO/,/knob./d' mm/Kconfig 2>/dev/null || true
+          sed -i '/clean_low_ratio/d' mm/Kconfig 2>/dev/null || true
+          echo "✅ Hard purge complete!"
 
       - name: Apply Real LZ4, Swappiness 40 & Force 'none' Scheduler (Advanced Python Engine)
         run: |
@@ -351,48 +391,6 @@ jobs:
                   with open(su_path, "w") as f: f.write(content)
                   print("✅ Schedutil rate limit hardcoded to 500us.")
           EOF
-          
-      - name: Purge le9uo commits (MGLRU Preparation)
-        run: |
-          cd work/common
-          echo "=== 1. Dynamically Finding and Reverting all le9uo commits ==="
-          
-          LE9UO_COMMITS=$(git log --grep="le9uo" -i --format="%H")
-          
-          if [ -n "$LE9UO_COMMITS" ]; then
-            echo "Found le9uo commits:"
-            echo "$LE9UO_COMMITS"
-            
-            for commit in $LE9UO_COMMITS; do
-              echo "-> Reverting: $commit"
-              if ! git revert --no-commit "$commit"; then
-                echo "⚠️ Conflict detected on $commit, checking conflicted files..."
-                for conf in arch/arm64/configs/gki_defconfig arch/arm64/configs/*defconfig; do
-                  if [ -f "$conf" ]; then
-                    git checkout HEAD -- "$conf" 2>/dev/null || true
-                    git add "$conf" 2>/dev/null || true
-                  fi
-                done
-
-                if git diff --name-only --diff-filter=U | grep -q .; then
-                  echo "⚠️ Unresolvable code conflict on $commit! Aborting this specific revert..."
-                  git revert --abort
-                else
-                  echo "✅ Defconfig conflict auto-resolved for $commit"
-                fi
-              fi
-            done
-            
-            git commit -m "chore: Purge le9uo commits for MGLRU" || true
-            echo "✅ le9uo commits successfully reverted!"
-          else
-            echo "✅ No le9uo commits found!"
-          fi
-
-          echo "=== 2. Hard Purge Leftover Kconfig Strings (Failsafe) ==="
-          sed -i '/config CLEAN_LOW_RATIO/,/knob./d' mm/Kconfig 2>/dev/null || true
-          sed -i '/clean_low_ratio/d' mm/Kconfig 2>/dev/null || true
-          echo "✅ Hard purge complete!"
 
       - name: Clean Hardcoded NoMount & Integrate Official NoMount (Method 3 - Dev Branch)
         run: |
