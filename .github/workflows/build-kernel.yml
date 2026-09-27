@@ -273,6 +273,9 @@ jobs:
           echo "# CONFIG_PELT_MULTIPLIER is not set" >> arch/arm64/configs/gki_defconfig
           echo "# CONFIG_SCHED_CORE_CTL is not set" >> arch/arm64/configs/gki_defconfig
 
+          echo "=== 3.5. Configure PELT Halflife to 32ms ==="
+          sed -i '/CONFIG_PELT_UTIL_HALFLIFE_16=y/d' arch/arm64/configs/gki_defconfig
+          echo "CONFIG_PELT_UTIL_HALFLIFE_32=y" >> arch/arm64/configs/gki_defconfig
 
           echo "=== 4. Advanced Python Engine: Inject Cool & Casual Tuning ==="
           python3 - << 'EOF'
