@@ -753,14 +753,7 @@ jobs:
           echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n" >> arch/arm64/configs/gki_defconfig
           echo "✅ ReSukiSU + SuSFS applied successfully!"
 
-          echo "=== 5. Absolute Stealth: LOCALVERSION Spoofing ==="
-          cat << 'EOF_LOCAL' > scripts/setlocalversion
-          #!/bin/sh
-          echo "-android12-9"
-          EOF_LOCAL
-          chmod +x scripts/setlocalversion
-          echo "✅ LOCALVERSION spoofing applied!"
-
+          
       - name: Ensuring clean standard audit_fsnotify.c
         run: |
           cd work/common
@@ -953,6 +946,34 @@ jobs:
           }
           device_initcall(audit_fsnotify_init);
           EOF
+
+      - name: Absolute Stealth (Dynamic UTS_RELEASE Injection)
+        run: |
+          cd work/common
+          
+          echo "=== 5. Absolute Stealth: Dynamic UTS_RELEASE Injection ==="
+          
+          # 1. Makefile se Kernel ka exact Base Version dynamically extract karein
+          K_VER=$(grep '^VERSION = ' Makefile | tr -d ' ' | cut -d= -f2)
+          K_PATCH=$(grep '^PATCHLEVEL = ' Makefile | tr -d ' ' | cut -d= -f2)
+          K_SUB=$(grep '^SUBLEVEL = ' Makefile | tr -d ' ' | cut -d= -f2)
+          K_EXTRA=$(grep '^EXTRAVERSION = ' Makefile | tr -d ' ' | cut -d= -f2)
+          
+          # 2. Defconfig se default Localversion nikaalein (jaise -android12-9)
+          LOCAL_VER=$(grep 'CONFIG_LOCALVERSION=' arch/arm64/configs/gki_defconfig | cut -d'"' -f2 || true)
+          
+          # 3. Clean version string merge karein (No '+', No Git commits)
+          CURRENT_BUILD_VERSION="${K_VER}.${K_PATCH}.${K_SUB}${K_EXTRA}${LOCAL_VER}"
+          echo "--> Dynamically detected clean version: $CURRENT_BUILD_VERSION"
+          
+          # 4. Extract kiye gaye clean version ko seedha C Code mai lock kar dein
+          sed -i "s/\.release.*=.*UTS_RELEASE,/.release\t= \"$CURRENT_BUILD_VERSION\",/g" init/version.c
+          
+          # 5. Default git tag script ko empty karke block karein (Safety)
+          echo "#!/bin/sh" > scripts/setlocalversion
+          chmod +x scripts/setlocalversion
+          
+          echo "✅ C Code strictly locked to dynamically detected version: $CURRENT_BUILD_VERSION !"
 
       - name: Setup Neutron Clang 24
         if: ${{ inputs.clang_version == 'neutron clang 24' }}
