@@ -162,13 +162,14 @@ jobs:
               fi
             done
             
+            echo "=== 2. Committing the reverted state before configuring ==="
             git commit -m "chore: Purge le9uo commits for MGLRU" || true
-            echo "✅ le9uo commits successfully reverted!"
+            echo "✅ le9uo commits successfully reverted and COMMITTED!"
           else
             echo "✅ No le9uo commits found!"
           fi
 
-          echo "=== 2. Hard Purge Leftover Kconfig Strings (Failsafe) ==="
+          echo "=== 3. Hard Purge Leftover Kconfig Strings (Failsafe) ==="
           sed -i '/config CLEAN_LOW_RATIO/,/knob./d' mm/Kconfig 2>/dev/null || true
           sed -i '/clean_low_ratio/d' mm/Kconfig 2>/dev/null || true
           echo "✅ Hard purge complete!"
@@ -420,8 +421,8 @@ jobs:
           elif [ -d "../nomount/src" ]; then
             cp -rf ../nomount/src/* fs/nomount/
           fi
-
-          echo "CONFIG_NOMOUNT=y" >> arch/arm64/configs/gki_defconfig
+          
+          # NOTE: CONFIG_NOMOUNT=y removed to prevent self-heal double-injection
           echo "✅ Old NoMount wiped and Official Method 3 (dev branch) applied!"
 
       - name: Apply SUSFS, Custom Patches & Direct Code Spoofing
@@ -729,25 +730,11 @@ jobs:
           
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -
 
-          sed -i 's/CONFIG_KSU=m/CONFIG_KSU=y/g' arch/arm64/configs/gki_defconfig || true
-          echo "CONFIG_KSU=y" >> arch/arm64/configs/gki_defconfig
+          # NOTE: Removed duplicate 'echo' KSU and KPROBES configs to prevent self-heal double-injection.
+          # These are already defined safely in the append_config environment variable.
           
-          echo "CONFIG_KSU_TOOLKIT_SUPPORT=y" >> arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SENTINEL=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_INLINE_HOOK=y" >> arch/arm64/configs/gki_defconfig
           
-          echo "CONFIG_KSU_DISABLE_SELINUX_VFS_GETXATTR=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_DEBUG=n" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUCOMPAT=n" >> arch/arm64/configs/gki_defconfig
-
-          echo "CONFIG_OVERLAY_FS=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KPROBES=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_HAVE_KPROBES=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KPROBE_EVENTS=y" >> arch/arm64/configs/gki_defconfig
-
-          echo "CONFIG_KALLSYMS=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KALLSYMS_ALL=y" >> arch/arm64/configs/gki_defconfig
-
           echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> arch/arm64/configs/gki_defconfig
