@@ -960,7 +960,7 @@ jobs:
           K_EXTRA=$(grep '^EXTRAVERSION = ' Makefile | tr -d ' ' | cut -d= -f2)
           
           # 2. Defconfig se default Localversion nikaalein (jaise -android12-9)
-          LOCAL_VER=$(grep 'CONFIG_LOCALVERSION=' arch/arm64/configs/gki_defconfig | cut -d'"' -f2 || true)
+          LOCAL_VER="-android12-9"
           
           # 3. Clean version string merge karein (No '+', No Git commits)
           CURRENT_BUILD_VERSION="${K_VER}.${K_PATCH}.${K_SUB}${K_EXTRA}${LOCAL_VER}"
