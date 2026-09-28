@@ -251,10 +251,8 @@ jobs:
           if os.path.exists(elv_path):
               with open(elv_path, "r") as f: content = f.read()
               
-              # ++ ADD THIS LINE ++ (Safely bypasses Clang's unused-function strictness)
               content = '#pragma GCC diagnostic ignored "-Wunused-function"\n' + content
               
-              # 1. Block kernel from setting a default during boot
               elv_init_pattern = r"void\s+elevator_init_mq\([^)]*\)\s*"
               elv_init_new = """void elevator_init_mq(struct request_queue *q)
           {
@@ -263,7 +261,6 @@ jobs:
           }"""
               content, s1 = replace_c_func_overkill(content, elv_init_pattern, elv_init_new)
               
-              # 2. Block user-space/ROM from overriding it later
               elv_store_pattern = r"ssize_t\s+elv_iosched_store\([^)]*\)\s*"
               elv_store_new = """ssize_t elv_iosched_store(struct request_queue *q, const char *name, size_t count)
           {
@@ -306,17 +303,53 @@ jobs:
           CONFIG_CASS=y
           EOF_SCHED
 
-          echo "=== 3. Force Purging Vendor Schedulers from Source Kconfigs ==="
+          echo "=== 3. Force Purging Vendor Schedulers from Source Kconfigs (Robust Python Engine) ==="
           # 1. Erase all forced architecture selections across the entire source tree
           find arch/arm64 drivers kernel -name "Kconfig*" -type f -exec sed -i '/select SCHED_WALT/d' {} +
           find arch/arm64 drivers kernel -name "Kconfig*" -type f -exec sed -i '/select PELT_MULTIPLIER/d' {} +
           find arch/arm64 drivers kernel -name "Kconfig*" -type f -exec sed -i '/select CPU_FREQ_GOV_VORPAL/d' {} +
           find arch/arm64 drivers kernel -name "Kconfig*" -type f -exec sed -i '/select CPU_FREQ_DEFAULT_GOV_VORPAL/d' {} +
 
-          # 2. Neuter the default 'y' values in their core definitions (safely targeting up to 6 lines down)
-          sed -i '/config SCHED_WALT/{N;N;N;N;N;N;s/default \(y\|Y\)/default n/g}' kernel/sched/Kconfig || true
-          sed -i '/config PELT_MULTIPLIER/{N;N;N;N;N;N;s/default \(y\|Y\)/default n/g}' kernel/sched/Kconfig || true
-          sed -i '/config CPU_FREQ_GOV_VORPAL/{N;N;N;N;N;N;s/default \(y\|Y\)/default n/g}' drivers/cpufreq/Kconfig || true
+          # 2. Use Robust Python Kconfig Parser to find and lock SCHED_WALT, PELT_MULTIPLIER, & VORPAL to default 'n' across all Kconfig files
+          python3 - << 'EOF'
+          import os
+
+          def process_kconfig(file_path):
+              with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                  lines = f.readlines()
+
+              modified = False
+              target_configs = {"SCHED_WALT", "PELT_MULTIPLIER", "CPU_FREQ_GOV_VORPAL"}
+              in_target_block = False
+
+              new_lines = []
+              for line in lines:
+                  stripped = line.strip()
+                  
+                  if stripped.startswith("config "):
+                      cfg_name = stripped.split()[1]
+                      in_target_block = (cfg_name in target_configs)
+                  elif stripped.startswith(("menuconfig ", "choice ", "end", "if ", "endif")):
+                      in_target_block = False
+
+                  if in_target_block and stripped.startswith("default "):
+                      if "y" in stripped.lower():
+                          indent = line[:line.index("default")]
+                          line = f"{indent}default n\n"
+                          modified = True
+
+                  new_lines.append(line)
+
+              if modified:
+                  with open(file_path, 'w', encoding='utf-8') as f:
+                      f.writelines(new_lines)
+                  print(f"✅ Updated Kconfig defaults to 'n': {file_path}")
+
+          for root, dirs, files in os.walk("."):
+              for file in files:
+                  if file.startswith("Kconfig"):
+                      process_kconfig(os.path.join(root, file))
+          EOF
 
           # 3. Explicitly disable them in your gki_defconfig
           sed -i 's/CONFIG_SCHED_WALT=y/# CONFIG_SCHED_WALT is not set/g' arch/arm64/configs/gki_defconfig
@@ -372,12 +405,10 @@ jobs:
               if end_idx != -1: return content[:start_idx] + new_func_code + content[end_idx:], True
               return content, False
 
-          # A) Block ROM from changing the Governor using Advanced Engine
           freq_path = "drivers/cpufreq/cpufreq.c"
           if os.path.exists(freq_path):
               with open(freq_path, "r") as f: content = f.read()
               
-              # ++ ADD THIS PRAGMA LINE ++
               content = '#pragma GCC diagnostic ignored "-Wunused-function"\n' + content
               
               freq_pattern = r"static\s+ssize_t\s+store_scaling_governor\([^)]*\)\s*"
@@ -391,12 +422,9 @@ jobs:
                   with open(freq_path, "w") as f: f.write(new_content)
                   print("✅ Governor sysfs locked permanently (Advanced Engine).")
 
-          # B) Hardcode Schedutil Rate Limit to 500us
           su_path = "kernel/sched/cpufreq_schedutil.c"
           if os.path.exists(su_path):
               with open(su_path, "r") as f: content = f.read()
-              
-              # Simple string replace is safer here since it's just updating one initialization value
               if "tunables->rate_limit_us = 2000;" in content:
                   content = content.replace("tunables->rate_limit_us = 2000;", "tunables->rate_limit_us = 500;")
                   with open(su_path, "w") as f: f.write(content)
@@ -432,7 +460,6 @@ jobs:
             cp -rf ../nomount/src/* fs/nomount/
           fi
           
-          # NOTE: CONFIG_NOMOUNT=y removed to prevent self-heal double-injection
           echo "✅ Old NoMount wiped and Official Method 3 (dev branch) applied!"
 
       - name: Apply SUSFS, Custom Patches & Direct Code Spoofing
@@ -711,11 +738,13 @@ jobs:
                       '\tnew_ids = kzalloc(sizeof(*new_ids), GFP_KERNEL); if (!new_ids) return;\n'
                       '\tfor (i=1; i<=policy->policydb.p_classes.nprim; i++) {\n'
                       '\t\tconst char *n = sym_name(&policy->policydb, SYM_CLASSES, i - 1); if(!n) continue;\n'
-                      '\t\tif(!strcmp(n, "capability")) new_ids->cap_c=i;\n\t\telse if(!strcmp(n, "process")) new_ids->process_c=i;\n\t\telse if(!strcmp(n, "binder")) new_ids->binder_c=i;\n\t}\n'
+                      '\t\tif(!strcmp(n, "capability")) new_ids->cap_c=i;\n\t\telse if(!strcmp(n, "process")) new_ids->process_c=i;\n\t\telse if(!strcmp(n, "binder")) new_ids->binder_c=i;\n'
+                      '\t}\n'
                       '\tfor (i=1; i<=policy->policydb.p_types.nprim; i++) {\n'
                       '\t\tconst char *n = sym_name(&policy->policydb, SYM_TYPES, i - 1); if(!n) continue;\n'
                       '\t\tif(!strcmp(n, "fsck_untrusted")) new_ids->fsck_t=i;\n\t\telse if(!strcmp(n, "shell")) new_ids->shell_t=i;\n\t\telse if(!strcmp(n, "su")) new_ids->su_t=i;\n'
-                      '\t\telse if(!strcmp(n, "adbd")) new_ids->adbd_t=i;\n\t\telse if(!strcmp(n, "adbroot")) new_ids->adbroot_t=i;\n\t}\n'
+                      '\t\telse if(!strcmp(n, "adbd")) new_ids->adbd_t=i;\n\t\telse if(!strcmp(n, "adbroot")) new_ids->adbroot_t=i;\n'
+                      '\t}\n'
                       '\tspin_lock(&spoof_update_lock);\n'
                       '\told_ids = rcu_dereference_protected(global_spoof, lockdep_is_held(&spoof_update_lock));\n'
                       '\trcu_assign_pointer(global_spoof, new_ids);\n'
@@ -739,9 +768,6 @@ jobs:
           echo "=== 4. Setting up ReSukiSU ==="
           
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -
-
-          # NOTE: Removed duplicate 'echo' KSU and KPROBES configs to prevent self-heal double-injection.
-          # These are already defined safely in the append_config environment variable.
           
           echo "CONFIG_KSU_SENTINEL=y" >> arch/arm64/configs/gki_defconfig
           
@@ -763,7 +789,6 @@ jobs:
           echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n" >> arch/arm64/configs/gki_defconfig
           echo "✅ ReSukiSU + SuSFS applied successfully!"
 
-          
       - name: Ensuring clean standard audit_fsnotify.c
         run: |
           cd work/common
@@ -963,23 +988,18 @@ jobs:
           
           echo "=== 5. Absolute Stealth: Dynamic UTS_RELEASE Injection ==="
           
-          # 1. Makefile se Kernel ka exact Base Version dynamically extract karein
           K_VER=$(grep '^VERSION = ' Makefile | tr -d ' ' | cut -d= -f2)
           K_PATCH=$(grep '^PATCHLEVEL = ' Makefile | tr -d ' ' | cut -d= -f2)
           K_SUB=$(grep '^SUBLEVEL = ' Makefile | tr -d ' ' | cut -d= -f2)
           K_EXTRA=$(grep '^EXTRAVERSION = ' Makefile | tr -d ' ' | cut -d= -f2)
           
-          # 2. Defconfig se default Localversion nikaalein (jaise -android12-9)
           LOCAL_VER="-android12-9"
           
-          # 3. Clean version string merge karein (No '+', No Git commits)
           CURRENT_BUILD_VERSION="${K_VER}.${K_PATCH}.${K_SUB}${K_EXTRA}${LOCAL_VER}"
           echo "--> Dynamically detected clean version: $CURRENT_BUILD_VERSION"
           
-          # 4. Extract kiye gaye clean version ko seedha C Code mai lock kar dein
           sed -i "s/\.release.*=.*UTS_RELEASE,/.release\t= \"$CURRENT_BUILD_VERSION\",/g" init/version.c
           
-          # 5. Default git tag script ko empty karke block karein (Safety)
           echo "#!/bin/sh" > scripts/setlocalversion
           chmod +x scripts/setlocalversion
           
