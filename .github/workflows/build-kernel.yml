@@ -306,13 +306,23 @@ jobs:
           CONFIG_CASS=y
           EOF_SCHED
 
-          echo "=== 3. Disable Vendor Schedulers (WALT, PELT, CORE_CTL) ==="
-          sed -i '/CONFIG_SCHED_WALT/d' arch/arm64/configs/gki_defconfig
-          sed -i '/CONFIG_PELT_MULTIPLIER/d' arch/arm64/configs/gki_defconfig
-          sed -i '/CONFIG_SCHED_CORE_CTL/d' arch/arm64/configs/gki_defconfig
-          echo "# CONFIG_SCHED_WALT is not set" >> arch/arm64/configs/gki_defconfig
-          echo "# CONFIG_PELT_MULTIPLIER is not set" >> arch/arm64/configs/gki_defconfig
-          echo "# CONFIG_SCHED_CORE_CTL is not set" >> arch/arm64/configs/gki_defconfig
+          echo "=== 3. Force Purging Vendor Schedulers from Source Kconfigs ==="
+          # 1. Erase all forced architecture selections across the entire source tree
+          find arch/arm64 drivers kernel -name "Kconfig*" -type f -exec sed -i '/select SCHED_WALT/d' {} +
+          find arch/arm64 drivers kernel -name "Kconfig*" -type f -exec sed -i '/select PELT_MULTIPLIER/d' {} +
+          find arch/arm64 drivers kernel -name "Kconfig*" -type f -exec sed -i '/select CPU_FREQ_GOV_VORPAL/d' {} +
+          find arch/arm64 drivers kernel -name "Kconfig*" -type f -exec sed -i '/select CPU_FREQ_DEFAULT_GOV_VORPAL/d' {} +
+
+          # 2. Neuter the default 'y' values in their core definitions (safely targeting up to 6 lines down)
+          sed -i '/config SCHED_WALT/{N;N;N;N;N;N;s/default \(y\|Y\)/default n/g}' kernel/sched/Kconfig || true
+          sed -i '/config PELT_MULTIPLIER/{N;N;N;N;N;N;s/default \(y\|Y\)/default n/g}' kernel/sched/Kconfig || true
+          sed -i '/config CPU_FREQ_GOV_VORPAL/{N;N;N;N;N;N;s/default \(y\|Y\)/default n/g}' drivers/cpufreq/Kconfig || true
+
+          # 3. Explicitly disable them in your gki_defconfig
+          sed -i 's/CONFIG_SCHED_WALT=y/# CONFIG_SCHED_WALT is not set/g' arch/arm64/configs/gki_defconfig
+          sed -i 's/CONFIG_PELT_MULTIPLIER=y/# CONFIG_PELT_MULTIPLIER is not set/g' arch/arm64/configs/gki_defconfig
+          sed -i 's/CONFIG_CPU_FREQ_GOV_VORPAL=y/# CONFIG_CPU_FREQ_GOV_VORPAL is not set/g' arch/arm64/configs/gki_defconfig
+          sed -i 's/CONFIG_CPU_FREQ_DEFAULT_GOV_VORPAL=y/# CONFIG_CPU_FREQ_DEFAULT_GOV_VORPAL is not set/g' arch/arm64/configs/gki_defconfig
 
           echo "=== 3.5. Configure PELT Halflife to 32ms ==="
           sed -i '/CONFIG_PELT_UTIL_HALFLIFE_16=y/d' arch/arm64/configs/gki_defconfig
