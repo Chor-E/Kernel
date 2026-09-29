@@ -904,14 +904,14 @@ jobs:
           echo "=== Setting up Google AutoFDO Tools ==="
           mkdir -p autofdo_tools
           cd autofdo_tools
-          curl -sL "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/autofdo.tar.gz" -o autofdo.tar.gz
-          tar -xzf autofdo.tar.gz
+          # Fetch the raw binary directly from AOSP Gerrit using base64 decoding to bypass archive errors
+          curl -sL "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/refs/heads/main/autofdo/create_llvm_prof?format=TEXT" | base64 -d > create_llvm_prof
           chmod +x create_llvm_prof
           cd ..
           
           echo "=== Downloading & Extracting PGO Data ==="
           curl -sL "https://www.dropbox.com/scl/fi/193udosv5xvjk0ax90ss6/afdo_package.zip?rlkey=0ypk2sg6t5xjkyimo5qpdlik9&st=bsa61fn5&dl=1" -o afdo_package.zip
-          unzip afdo_package.zip -d pgo_workspace/
+          unzip -o afdo_package.zip -d pgo_workspace/
           
           echo "=== Locating Files Safely ==="
           VMLINUX_PATH=$(find pgo_workspace -type f -name "vmlinux" | head -n 1)
@@ -927,7 +927,6 @@ jobs:
           if [ -n "$PERF3_PATH" ]; then ./autofdo_tools/create_llvm_prof --binary=$VMLINUX_PATH --profile=$PERF3_PATH --out=profile3.afdo; fi
           
           echo "=== Merging Profiles with Neutron's llvm-profdata ==="
-          # Finding all successfully generated .afdo files
           AFDO_FILES=$(ls *.afdo 2>/dev/null || true)
           if [ -n "$AFDO_FILES" ]; then
             llvm-profdata merge -sample $AFDO_FILES -output=$GITHUB_WORKSPACE/kernel_final.profdata
@@ -936,6 +935,7 @@ jobs:
             echo "Error: No AFDO profiles generated"
             exit 1
           fi
+
 
       - name: Inject Polly & Extreme Optimizations
         run: |
