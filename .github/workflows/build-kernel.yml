@@ -899,10 +899,8 @@ jobs:
           echo "CXX=ccache clang++" >> $GITHUB_ENV
           echo "LTO=full" >> $GITHUB_ENV
 
-      - name: Inject Polly, MLGO & Extreme Optimizations
+      - name: Inject Polly & Extreme Optimizations
         run: |
-          cd work/common
-          perl -pi -e 's/(KBUILD_CFLAGS \+= -Wno-gnu)/$1\n\n# Optimization (MLGO)\nKBUILD_CFLAGS += -mllvm -inline-advisor=release\nKBUILD_CFLAGS += -mllvm -regalloc-enable-advisor=release/' Makefile
           echo 'KCFLAGS=-O3 -mllvm -polly -mllvm -polly-run-inliner -mllvm -polly-vectorizer=stripmine' >> $GITHUB_ENV
 
       - name: Build kernel
