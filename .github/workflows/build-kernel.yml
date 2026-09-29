@@ -987,24 +987,28 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/work/common
           
-          echo "=== 1. Installing Cross-Platform AFDO Tools ==="
-          # autofdo package provides 'create_llvm_prof' which handles ARM64 perf.data safely
+          echo "=== 1. Installing Official LLVM 24 & Linux Perf ==="
           sudo apt-get update
-          sudo apt-get install -y autofdo llvm-18
+          # YAHI THI ASLI PROBLEM: 'perf' tool system mein nahi tha. 'linux-perf' install karna zaroori hai.
+          sudo apt-get install -y linux-perf
+          
+          # Official LLVM 24 Install (Taaki Neutron Clang se perfect match ho)
+          wget -q https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 24
+          sudo apt-get install -y llvm-24
           
           echo "=== 2. Downloading Data from Dropbox ==="
           wget -q -O afdo_package.zip "https://www.dropbox.com/scl/fi/193udosv5xvjk0ax90ss6/afdo_package.zip?rlkey=0ypk2sg6t5xjkyimo5qpdlik9&st=bsa61fn5&dl=1"
           unzip -o afdo_package.zip
           
-          echo "=== 3. Converting Profiles (Cross-Arch Safe) ==="
-          # Using create_llvm_prof to bypass the 'incompatible file format' crash
-          create_llvm_prof --binary=vmlinux --profile=perf1.data --out=profile1.afdo
-          create_llvm_prof --binary=vmlinux --profile=perf2.data --out=profile2.afdo
-          create_llvm_prof --binary=vmlinux --profile=perf3.data --out=profile3.afdo
+          echo "=== 3. Converting Profiles using LLVM 24 ==="
+          llvm-profgen-24 --binary=vmlinux --perfdata=perf1.data --output=profile1.afdo
+          llvm-profgen-24 --binary=vmlinux --perfdata=perf2.data --output=profile2.afdo
+          llvm-profgen-24 --binary=vmlinux --perfdata=perf3.data --output=profile3.afdo
           
           echo "=== 4. Merging to kernel.afdo ==="
-          # '-text' format ensures Neutron Clang 24 reads it perfectly without version mismatch
-          llvm-profdata-18 merge -sample -text -output=kernel.afdo profile1.afdo profile2.afdo profile3.afdo
+          llvm-profdata-24 merge -sample -text -output=kernel.afdo profile1.afdo profile2.afdo profile3.afdo
           
           echo "=== 5. Cleaning Temporary Files ==="
           rm afdo_package.zip vmlinux perf1.data perf2.data perf3.data profile1.afdo profile2.afdo profile3.afdo
@@ -1014,7 +1018,7 @@ jobs:
           MLGO_FLAGS="-mllvm -enable-ml-inliner=release"
           echo "KCFLAGS=$AFDO_FLAG $MLGO_FLAGS" >> $GITHUB_ENV
           
-          echo "✅ AutoFDO profile generated safely and flags injected!"
+          echo "✅ AutoFDO profile generated and flags injected successfully!"
 
       - name: Build kernel
         run: |
