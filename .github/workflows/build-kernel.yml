@@ -91,7 +91,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdw-dev ccache gh bc bison flex libssl-dev libelf-dev dwarves cpio curl zstd lz4
+          sudo apt-get install -y libdw-dev ccache gh bc bison flex libssl-dev libelf-dev dwarves cpio curl zstd lz4 unzip
           pip install lxml
 
       - name: Configure Git Safe Directory & Identity
@@ -159,7 +159,7 @@ jobs:
           sed -i '/config CLEAN_LOW_RATIO/,/knob./d' mm/Kconfig 2>/dev/null || true
           sed -i '/clean_low_ratio/d' mm/Kconfig 2>/dev/null || true
 
-      - name: Apply Real LZ4, Swappiness 40 & Force 'none' Scheduler (Advanced Python Engine)
+      - name: Apply Real LZ4, Swappiness 40 & Force 'none' Scheduler
         run: |
           cd work/common
 
@@ -249,7 +249,7 @@ jobs:
                   with open(elv_path, "w") as f: f.write(content)
           EOF
 
-      - name: Hardcode Schedutil Governor & Tuning (Advanced Python Engine)
+      - name: Hardcode Schedutil Governor & Tuning
         run: |
           cd work/common
 
@@ -345,7 +345,7 @@ jobs:
                   with open(su_path, "w") as f: f.write(content)
           EOF
 
-      - name: Clean Hardcoded NoMount & Integrate Official NoMount (Method 3 - Dev Branch)
+      - name: Clean Hardcoded NoMount & Integrate Official NoMount
         run: |
           cd work/common
 
@@ -899,9 +899,47 @@ jobs:
           echo "CXX=ccache clang++" >> $GITHUB_ENV
           echo "LTO=full" >> $GITHUB_ENV
 
+      - name: Generate LLVM AutoFDO Profile (from simpleperf)
+        run: |
+          echo "=== Setting up Google AutoFDO Tools ==="
+          mkdir -p autofdo_tools
+          cd autofdo_tools
+          curl -sL "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/autofdo.tar.gz" -o autofdo.tar.gz
+          tar -xzf autofdo.tar.gz
+          chmod +x create_llvm_prof
+          cd ..
+          
+          echo "=== Downloading & Extracting PGO Data ==="
+          curl -sL "https://www.dropbox.com/scl/fi/193udosv5xvjk0ax90ss6/afdo_package.zip?rlkey=0ypk2sg6t5xjkyimo5qpdlik9&st=bsa61fn5&dl=1" -o afdo_package.zip
+          unzip afdo_package.zip -d pgo_workspace/
+          
+          echo "=== Locating Files Safely ==="
+          VMLINUX_PATH=$(find pgo_workspace -type f -name "vmlinux" | head -n 1)
+          PERF1_PATH=$(find pgo_workspace -type f -name "perf1.data" | head -n 1)
+          PERF2_PATH=$(find pgo_workspace -type f -name "perf2.data" | head -n 1)
+          PERF3_PATH=$(find pgo_workspace -type f -name "perf3.data" | head -n 1)
+          
+          if [ -z "$VMLINUX_PATH" ]; then echo "Error: vmlinux not found in zip"; exit 1; fi
+          
+          echo "=== Generating Profiles from Simpleperf ==="
+          if [ -n "$PERF1_PATH" ]; then ./autofdo_tools/create_llvm_prof --binary=$VMLINUX_PATH --profile=$PERF1_PATH --out=profile1.afdo; fi
+          if [ -n "$PERF2_PATH" ]; then ./autofdo_tools/create_llvm_prof --binary=$VMLINUX_PATH --profile=$PERF2_PATH --out=profile2.afdo; fi
+          if [ -n "$PERF3_PATH" ]; then ./autofdo_tools/create_llvm_prof --binary=$VMLINUX_PATH --profile=$PERF3_PATH --out=profile3.afdo; fi
+          
+          echo "=== Merging Profiles with Neutron's llvm-profdata ==="
+          # Finding all successfully generated .afdo files
+          AFDO_FILES=$(ls *.afdo 2>/dev/null || true)
+          if [ -n "$AFDO_FILES" ]; then
+            llvm-profdata merge -sample $AFDO_FILES -output=$GITHUB_WORKSPACE/kernel_final.profdata
+            echo "Profile generated at $GITHUB_WORKSPACE/kernel_final.profdata"
+          else
+            echo "Error: No AFDO profiles generated"
+            exit 1
+          fi
+
       - name: Inject Polly & Extreme Optimizations
         run: |
-          echo 'KCFLAGS=-O3 -mllvm -polly -mllvm -polly-run-inliner -mllvm -polly-vectorizer=stripmine' >> $GITHUB_ENV
+          echo "KCFLAGS=-O3 -mllvm -polly -mllvm -polly-run-inliner -mllvm -polly-vectorizer=stripmine -fprofile-sample-use=$GITHUB_WORKSPACE/kernel_final.profdata" >> $GITHUB_ENV
 
       - name: Build kernel
         run: |
