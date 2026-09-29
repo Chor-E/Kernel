@@ -899,9 +899,9 @@ jobs:
           echo "CXX=ccache clang++" >> $GITHUB_ENV
           echo "LTO=full" >> $GITHUB_ENV
 
-      - name: Inject MLGO, Polly & Extreme Optimizations (No PGO needed)
+      - name: Inject Polly & Extreme Optimizations
         run: |
-          echo 'KCFLAGS=-O3 -mllvm -enable-ml-inliner=release -mllvm -polly -mllvm -polly-run-inliner -mllvm -polly-vectorizer=stripmine' >> $GITHUB_ENV
+          echo 'KCFLAGS=-O3 -mllvm -polly -mllvm -polly-run-inliner -mllvm -polly-vectorizer=stripmine' >> $GITHUB_ENV
 
       - name: Build kernel
         run: |
