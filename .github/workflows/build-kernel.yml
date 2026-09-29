@@ -16,7 +16,7 @@ on:
       kernel_repo:
         description: 'Kernel source repository (full URL)'
         required: false
-        default: "https://github.com/Steambot12/Templar-Kernel-GKI-5.10"
+        default: "https://github.com/Chor-E/Templar-Kernel-GKI-5.10"
       kernel_branch:
         description: 'Kernel source branch'
         required: false
