@@ -902,7 +902,7 @@ jobs:
       - name: Inject Polly, MLGO & Extreme Optimizations
         run: |
           cd work/common
-          sed -i '/KBUILD_CFLAGS += -Wno-gnu/a \n# Optimization (MLGO)\nKBUILD_CFLAGS += -mllvm -inline-advisor=release\nKBUILD_CFLAGS += -mllvm -regalloc-enable-advisor=release' Makefile
+          perl -pi -e 's/(KBUILD_CFLAGS \+= -Wno-gnu)/$1\n\n# Optimization (MLGO)\nKBUILD_CFLAGS += -mllvm -inline-advisor=release\nKBUILD_CFLAGS += -mllvm -regalloc-enable-advisor=release/' Makefile
           echo 'KCFLAGS=-O3 -mllvm -polly -mllvm -polly-run-inliner -mllvm -polly-vectorizer=stripmine' >> $GITHUB_ENV
 
       - name: Build kernel
