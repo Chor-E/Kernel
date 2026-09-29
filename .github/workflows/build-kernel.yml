@@ -987,21 +987,25 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/work/common
           
-          echo "=== 1. Installing llvm-profgen ==="
-          sudo apt-get update && sudo apt-get install -y llvm
+          echo "=== 1. Installing Official Latest LLVM 24 ==="
+          # Ubuntu ke default repo ko chhod kar official LLVM script use karenge
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 24
+          sudo apt-get install -y llvm-24
           
           echo "=== 2. Downloading Data from Dropbox ==="
           wget -q -O afdo_package.zip "https://www.dropbox.com/scl/fi/193udosv5xvjk0ax90ss6/afdo_package.zip?rlkey=0ypk2sg6t5xjkyimo5qpdlik9&st=bsa61fn5&dl=1"
           unzip -o afdo_package.zip
           
-          echo "=== 3. Converting Profiles using System LLVM ==="
-          # Neutron ki jagah system ka llvm-profgen use kar rahe hain
-          llvm-profgen --binary=vmlinux --perfdata=perf1.data --output=profile1.afdo
-          llvm-profgen --binary=vmlinux --perfdata=perf2.data --output=profile2.afdo
-          llvm-profgen --binary=vmlinux --perfdata=perf3.data --output=profile3.afdo
+          echo "=== 3. Converting Profiles using LLVM 24 ==="
+          # Exact matching version use karna zaroori hai
+          llvm-profgen-24 --binary=vmlinux --perfdata=perf1.data --output=profile1.afdo
+          llvm-profgen-24 --binary=vmlinux --perfdata=perf2.data --output=profile2.afdo
+          llvm-profgen-24 --binary=vmlinux --perfdata=perf3.data --output=profile3.afdo
           
           echo "=== 4. Merging to kernel.afdo ==="
-          llvm-profdata merge -sample -output=kernel.afdo profile1.afdo profile2.afdo profile3.afdo
+          llvm-profdata-24 merge -sample -text -output=kernel.afdo profile1.afdo profile2.afdo profile3.afdo
           
           echo "=== 5. Cleaning Temporary Files ==="
           rm afdo_package.zip vmlinux perf1.data perf2.data perf3.data profile1.afdo profile2.afdo profile3.afdo
@@ -1011,7 +1015,7 @@ jobs:
           MLGO_FLAGS="-mllvm -enable-ml-inliner=release"
           echo "KCFLAGS=$AFDO_FLAG $MLGO_FLAGS" >> $GITHUB_ENV
           
-          echo "✅ AutoFDO and MLGO flags injected successfully!"
+          echo "✅ AutoFDO profile generated using LLVM 24 and flags injected successfully!"
 
       - name: Build kernel
         run: |
