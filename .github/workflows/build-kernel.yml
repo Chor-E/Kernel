@@ -981,7 +981,36 @@ jobs:
           echo "CC=ccache clang" >> $GITHUB_ENV
           echo "CXX=ccache clang++" >> $GITHUB_ENV
           echo "LTO=full" >> $GITHUB_ENV
+
+      - name: Generate AutoFDO Profile & Enable MLGO (PGO)
+        if: ${{ inputs.clang_version == 'neutron clang 24' }}
+        run: |
+          cd $GITHUB_WORKSPACE/work/common
           
+          echo "=== 1. Downloading Data from Dropbox ==="
+          wget -q -O afdo_package.zip "https://www.dropbox.com/scl/fi/193udosv5xvjk0ax90ss6/afdo_package.zip?rlkey=0ypk2sg6t5xjkyimo5qpdlik9&st=bsa61fn5&dl=1"
+          unzip -o afdo_package.zip
+          
+          echo "=== 2. Converting Profiles using Neutron Clang ==="
+          CLANG_BIN="$GITHUB_WORKSPACE/neutron-clang/bin"
+          
+          $CLANG_BIN/llvm-profgen --binary=vmlinux --perfdata=perf1.data --output=profile1.afdo
+          $CLANG_BIN/llvm-profgen --binary=vmlinux --perfdata=perf2.data --output=profile2.afdo
+          $CLANG_BIN/llvm-profgen --binary=vmlinux --perfdata=perf3.data --output=profile3.afdo
+          
+          echo "=== 3. Merging to kernel.afdo ==="
+          $CLANG_BIN/llvm-profdata merge -sample -output=kernel.afdo profile1.afdo profile2.afdo profile3.afdo
+          
+          echo "=== 4. Cleaning Temporary Files ==="
+          rm afdo_package.zip vmlinux perf1.data perf2.data perf3.data profile1.afdo profile2.afdo profile3.afdo
+          
+          echo "=== 5. Injecting Flags Safely (AutoFDO + MLGO) ==="
+          AFDO_FLAG="-fprofile-sample-use=$GITHUB_WORKSPACE/work/common/kernel.afdo"
+          MLGO_FLAGS="-mllvm -enable-ml-inliner=release"
+          echo "KCFLAGS=$AFDO_FLAG $MLGO_FLAGS" >> $GITHUB_ENV
+          
+          echo "✅ AutoFDO and MLGO flags injected successfully!"
+
       - name: Build kernel
         run: |
           chmod +x ./build-kernel.sh
