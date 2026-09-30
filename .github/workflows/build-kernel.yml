@@ -1,8 +1,6 @@
-name: build-kernel
+Name: build-kernel
 
 on:
-  schedule:
-    - cron: "0 22 * * *"
   workflow_dispatch:
     inputs:
       publish_release:
@@ -91,7 +89,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdw-dev ccache gh bc bison flex libssl-dev libelf-dev dwarves cpio curl zstd lz4 unzip
+          sudo apt-get install -y libdw-dev ccache gh bc bison flex libssl-dev libelf-dev dwarves cpio curl zstd lz4
           pip install lxml
 
       - name: Configure Git Safe Directory & Identity
@@ -134,12 +132,18 @@ jobs:
       - name: Purge le9uo commits (MGLRU Preparation)
         run: |
           cd work/common
+          echo "=== 1. Dynamically Finding and Reverting all le9uo commits ==="
           
           LE9UO_COMMITS=$(git log --grep="le9uo" -i --format="%H")
           
           if [ -n "$LE9UO_COMMITS" ]; then
+            echo "Found le9uo commits:"
+            echo "$LE9UO_COMMITS"
+            
             for commit in $LE9UO_COMMITS; do
+              echo "-> Reverting: $commit"
               if ! git revert --no-commit "$commit"; then
+                echo "⚠️ Conflict detected on $commit, checking conflicted files..."
                 for conf in arch/arm64/configs/gki_defconfig arch/arm64/configs/*defconfig; do
                   if [ -f "$conf" ]; then
                     git checkout HEAD -- "$conf" 2>/dev/null || true
@@ -148,25 +152,37 @@ jobs:
                 done
 
                 if git diff --name-only --diff-filter=U | grep -q .; then
+                  echo "⚠️ Unresolvable code conflict on $commit! Aborting this specific revert..."
                   git revert --abort
+                else
+                  echo "✅ Defconfig conflict auto-resolved for $commit"
                 fi
               fi
             done
             
+            echo "=== 2. Committing the reverted state before configuring ==="
             git commit -m "chore: Purge le9uo commits for MGLRU" || true
+            echo "✅ le9uo commits successfully reverted and COMMITTED!"
+          else
+            echo "✅ No le9uo commits found!"
           fi
 
+          echo "=== 3. Hard Purge Leftover Kconfig Strings (Failsafe) ==="
           sed -i '/config CLEAN_LOW_RATIO/,/knob./d' mm/Kconfig 2>/dev/null || true
           sed -i '/clean_low_ratio/d' mm/Kconfig 2>/dev/null || true
+          echo "✅ Hard purge complete!"
 
-      - name: Apply Real LZ4, Swappiness 40 & Force 'none' Scheduler
+      - name: Apply Real LZ4, Swappiness 40 & Force 'none' Scheduler (Advanced Python Engine)
         run: |
           cd work/common
 
+          echo "=== 1. Real Swappiness Change ==="
           sed -i 's/vm.swappiness=5/vm.swappiness=40 elevator=none/g' arch/arm64/configs/gki_defconfig
 
+          echo "=== 2. Hardcode Real LZ4 Compressor in Kernel ==="
           echo 'CONFIG_ZRAM_DEF_COMP="lz4"' >> arch/arm64/configs/gki_defconfig
           
+          echo "=== 3. Lock ZRAM & I/O Scheduler (Advanced C-Lexer Engine) ==="
           python3 - << 'EOF'
           import os, re
 
@@ -210,6 +226,7 @@ jobs:
               if end_idx != -1: return content[:start_idx] + new_func_code + content[end_idx:], True
               return content, False
 
+          # A) Lock ZRAM to LZ4 permanently using Advanced Engine
           zram_path = "drivers/block/zram/zram_drv.c"
           if os.path.exists(zram_path):
               with open(zram_path, "r") as f: content = f.read()
@@ -219,43 +236,54 @@ jobs:
                                           struct device_attribute *attr,
                                           const char *buf, size_t len)
           {
+          \t/* BLOCK ROM ZRAM OVERWRITE - HARDCODED TO LZ4 */
           \treturn len;
           }"""
               new_content, success = replace_c_func_overkill(content, zram_pattern, zram_new_func)
               if success:
                   with open(zram_path, "w") as f: f.write(new_content)
+                  print("✅ ZRAM LZ4 strictly locked (Advanced Engine).")
 
+          # B) Lock I/O Scheduler to 'none' globally
           elv_path = "block/elevator.c"
           if os.path.exists(elv_path):
               with open(elv_path, "r") as f: content = f.read()
               
+              # ++ ADD THIS LINE ++ (Safely bypasses Clang's unused-function strictness)
               content = '#pragma GCC diagnostic ignored "-Wunused-function"\n' + content
               
+              # 1. Block kernel from setting a default during boot
               elv_init_pattern = r"void\s+elevator_init_mq\([^)]*\)\s*"
               elv_init_new = """void elevator_init_mq(struct request_queue *q)
           {
+          \t/* FORCE 'NONE' SCHEDULER GLOBALLY - INIT BLOCKED */
           \treturn;
           }"""
               content, s1 = replace_c_func_overkill(content, elv_init_pattern, elv_init_new)
               
+              # 2. Block user-space/ROM from overriding it later
               elv_store_pattern = r"ssize_t\s+elv_iosched_store\([^)]*\)\s*"
               elv_store_new = """ssize_t elv_iosched_store(struct request_queue *q, const char *name, size_t count)
           {
+          \t/* BLOCK ROM SCHEDULER OVERWRITE */
           \treturn count;
           }"""
               content, s2 = replace_c_func_overkill(content, elv_store_pattern, elv_store_new)
               
               if s1 or s2:
                   with open(elv_path, "w") as f: f.write(content)
+                  print("✅ I/O Scheduler globally locked to 'none' (Advanced Engine).")
           EOF
 
-      - name: Hardcode Schedutil Governor & Tuning
+      - name: Hardcode Schedutil Governor & Tuning (Advanced Python Engine)
         run: |
           cd work/common
 
+          echo "=== 1. Lock Schedutil as Default Governor ==="
           sed -i 's/CONFIG_CPU_FREQ_DEFAULT_GOV_VORPAL=y/# CONFIG_CPU_FREQ_DEFAULT_GOV_VORPAL is not set/g' arch/arm64/configs/gki_defconfig
           sed -i 's/CONFIG_CPU_FREQ_DEFAULT_GOV_WALT=y/# CONFIG_CPU_FREQ_DEFAULT_GOV_WALT is not set/g' arch/arm64/configs/gki_defconfig
           
+          echo "=== 2. Apply Custom CPU & Scheduler Config Flags ==="
           cat << 'EOF_SCHED' >> arch/arm64/configs/gki_defconfig
           CONFIG_ENERGY_MODEL=y
           CONFIG_CPU_FREQ=y
@@ -276,9 +304,29 @@ jobs:
           CONFIG_CASS=y
           EOF_SCHED
 
+          echo "=== 3. Force Purging Vendor Schedulers from Source Kconfigs ==="
+          # 1. Erase all forced architecture selections across the entire source tree
+          find arch/arm64 drivers kernel -name "Kconfig*" -type f -exec sed -i '/select SCHED_WALT/d' {} +
+          find arch/arm64 drivers kernel -name "Kconfig*" -type f -exec sed -i '/select PELT_MULTIPLIER/d' {} +
+          find arch/arm64 drivers kernel -name "Kconfig*" -type f -exec sed -i '/select CPU_FREQ_GOV_VORPAL/d' {} +
+          find arch/arm64 drivers kernel -name "Kconfig*" -type f -exec sed -i '/select CPU_FREQ_DEFAULT_GOV_VORPAL/d' {} +
+
+          # 2. Neuter the default 'y' values in their core definitions (safely targeting up to 6 lines down)
+          sed -i '/config SCHED_WALT/{N;N;N;N;N;N;s/default \(y\|Y\)/default n/g}' kernel/sched/Kconfig || true
+          sed -i '/config PELT_MULTIPLIER/{N;N;N;N;N;N;s/default \(y\|Y\)/default n/g}' kernel/sched/Kconfig || true
+          sed -i '/config CPU_FREQ_GOV_VORPAL/{N;N;N;N;N;N;s/default \(y\|Y\)/default n/g}' drivers/cpufreq/Kconfig || true
+
+          # 3. Explicitly disable them in your gki_defconfig
+          sed -i 's/CONFIG_SCHED_WALT=y/# CONFIG_SCHED_WALT is not set/g' arch/arm64/configs/gki_defconfig
+          sed -i 's/CONFIG_PELT_MULTIPLIER=y/# CONFIG_PELT_MULTIPLIER is not set/g' arch/arm64/configs/gki_defconfig
+          sed -i 's/CONFIG_CPU_FREQ_GOV_VORPAL=y/# CONFIG_CPU_FREQ_GOV_VORPAL is not set/g' arch/arm64/configs/gki_defconfig
+          sed -i 's/CONFIG_CPU_FREQ_DEFAULT_GOV_VORPAL=y/# CONFIG_CPU_FREQ_DEFAULT_GOV_VORPAL is not set/g' arch/arm64/configs/gki_defconfig
+
+          echo "=== 3.5. Configure PELT Halflife to 32ms ==="
           sed -i '/CONFIG_PELT_UTIL_HALFLIFE_16=y/d' arch/arm64/configs/gki_defconfig
           echo "CONFIG_PELT_UTIL_HALFLIFE_32=y" >> arch/arm64/configs/gki_defconfig
 
+          echo "=== 4. Advanced Python Engine: Inject Cool & Casual Tuning ==="
           python3 - << 'EOF'
           import os, re
 
@@ -322,33 +370,42 @@ jobs:
               if end_idx != -1: return content[:start_idx] + new_func_code + content[end_idx:], True
               return content, False
 
+          # A) Block ROM from changing the Governor using Advanced Engine
           freq_path = "drivers/cpufreq/cpufreq.c"
           if os.path.exists(freq_path):
               with open(freq_path, "r") as f: content = f.read()
               
+              # ++ ADD THIS PRAGMA LINE ++
               content = '#pragma GCC diagnostic ignored "-Wunused-function"\n' + content
               
               freq_pattern = r"static\s+ssize_t\s+store_scaling_governor\([^)]*\)\s*"
               freq_new_func = """static ssize_t store_scaling_governor(struct cpufreq_policy *policy, const char *buf, size_t count)
           {
+          \t/* 🔒 HARD-LOCKED TO SCHEDUTIL: IGNORE ROM WALT OVERWRITES */
           \treturn count;
           }"""
               new_content, success = replace_c_func_overkill(content, freq_pattern, freq_new_func)
               if success:
                   with open(freq_path, "w") as f: f.write(new_content)
+                  print("✅ Governor sysfs locked permanently (Advanced Engine).")
 
+          # B) Hardcode Schedutil Rate Limit to 500us
           su_path = "kernel/sched/cpufreq_schedutil.c"
           if os.path.exists(su_path):
               with open(su_path, "r") as f: content = f.read()
+              
+              # Simple string replace is safer here since it's just updating one initialization value
               if "tunables->rate_limit_us = 2000;" in content:
                   content = content.replace("tunables->rate_limit_us = 2000;", "tunables->rate_limit_us = 500;")
                   with open(su_path, "w") as f: f.write(content)
+                  print("✅ Schedutil rate limit hardcoded to 500us.")
           EOF
 
-      - name: Clean Hardcoded NoMount & Integrate Official NoMount
+      - name: Clean Hardcoded NoMount & Integrate Official NoMount (Method 3 - Dev Branch)
         run: |
           cd work/common
 
+          echo "=== 1. Completely Purging All Old NoMount ==="
           rm -rf fs/nomount fs/nomount.c fs/nomount.h
           sed -i '/nomount/d' fs/Kconfig
           sed -i '/nomount/d' fs/Makefile
@@ -360,6 +417,7 @@ jobs:
           sed -i '/nomount/d' fs/readdir.c 2>/dev/null || true
           sed -i '/nomount/d' fs/proc/task_mmu.c 2>/dev/null || true
 
+          echo "=== 2. Integrating Official NoMount via Method 3 (dev branch) ==="
           git clone --depth=1 -b dev https://github.com/maxsteeel/nomount.git ../nomount
 
           sed -i '$i source "fs/nomount/Kconfig"' fs/Kconfig
@@ -371,43 +429,55 @@ jobs:
           elif [ -d "../nomount/src" ]; then
             cp -rf ../nomount/src/* fs/nomount/
           fi
+          
+          # NOTE: CONFIG_NOMOUNT=y removed to prevent self-heal double-injection
+          echo "✅ Old NoMount wiped and Official Method 3 (dev branch) applied!"
 
       - name: Apply SUSFS, Custom Patches & Direct Code Spoofing
         run: |
           cd work/common
 
+          echo "=== 1. Integrating SUSFS into Kernel ==="
           git clone --depth=1 -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
           cp -r ../susfs4ksu/kernel_patches/fs/* fs/
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
-          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || true
+          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || echo "Warning: SUSFS patch issue"
           
           sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
+          echo "✅ Fixed current_uid() missing header in susfs_def.h"
 
           sed -i '1i #include <linux/cred.h>' fs/statfs.c
           sed -i '2i #include <linux/susfs.h>' fs/statfs.c
           
           sed -i '/#include "internal.h"/a #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT\nextern int susfs_sus_kstat_spoof_vfs_statfs(struct inode *inode, struct kstatfs *buf, bool *is_fuse);\n#endif' fs/statfs.c
+          echo "✅ Fixed SuSFS compilation headers and patch structural bugs!"
 
           echo "int __attribute__((weak)) ksu_install_su_fd(struct file *file) { return 0; }" >> fs/susfs.c
 
+          echo "=== 2. Applying Custom Patches (services, etc.) ==="
           for dir in "$GITHUB_WORKSPACE/.github/workflows/patches" "$GITHUB_WORKSPACE/patches"; do
             if [ -d "$dir" ]; then
               for patch_file in "$dir"/*.patch; do
                 if [ -f "$patch_file" ]; then
+                  echo "Applying $patch_file..."
                   sed -i 's/\r$//' "$patch_file"
                   
                   if git apply --verbose --ignore-whitespace --whitespace=nowarn "$patch_file"; then
-                    true
+                    echo "✅ Applied via git apply"
                   elif patch -p1 -N -F 3 --no-backup-if-mismatch < "$patch_file"; then
-                    true
+                    echo "✅ Applied via patch"
                   else
+                    echo "::error:: Failed to apply patch $patch_file ! Aborting build."
                     exit 1
                   fi
+
                 fi
               done
             fi
           done
+          echo "✅ All .patch files applied successfully!"
 
+          echo "=== 3. Directly Injecting Spoof Modifications via Python (C89 Compliant) ==="
           python3 - << 'EOF'
           import os
           import re
@@ -520,6 +590,7 @@ jobs:
               new_content, success = replace_c_func_overkill(content, pattern, replacement_func)
               if success:
                   with open(cmdline_path, "w") as f: f.write(new_content)
+                  print("✅ cmdline.c -> SPOOFED")
 
           boot_path = "fs/proc/bootconfig.c"
           if os.path.exists(boot_path):
@@ -571,6 +642,7 @@ jobs:
               new_boot_content, success = replace_c_func_overkill(boot_content, boot_pattern, boot_replacement)
               if success:
                   with open(boot_path, "w") as f: f.write(new_boot_content)
+                  print("✅ bootconfig.c -> SPOOFED")
 
           array_path = "fs/proc/array.c"
           if os.path.exists(array_path):
@@ -584,6 +656,7 @@ jobs:
               if tstate_target in array_content:
                   array_content = array_content.replace(tstate_target, tstate_repl)
                   with open(array_path, "w") as f: f.write(array_content)
+                  print("✅ array.c -> SPOOFED (C89 Compliant)")
 
           services_path = "security/selinux/ss/services.c"
           if os.path.exists(services_path):
@@ -593,6 +666,7 @@ jobs:
               
               av_hook_injection = r"""\1
 
+          	/* --- SAFED AVC BYPASS --- */
           	if (unlikely(avd->allowed) && scontext && tcontext) {
           		if (unlikely(__kuid_val(current_uid()) >= 10000)) {
           			struct selinux_spoof_ids *s_ids;
@@ -615,7 +689,8 @@ jobs:
           			}
           			rcu_read_unlock();
           		}
-          	}"""
+          	}
+          	/* ------------------------------------- */"""
 
               if "SAFED AVC BYPASS" not in serv_content:
                   serv_content = re.sub(target_av_call_regex, av_hook_injection, serv_content, count=1)
@@ -623,6 +698,7 @@ jobs:
                   engine_marker = '#include "policycap_names.h"'
                   engine_code = (
                       '#include "policycap_names.h"\n\n'
+                      '/* --- INJECTED: SECURE SELINUX ID SPOOF --- */\n'
                       '#include <linux/uidgid.h>\n#include <linux/cred.h>\n'
                       '#include <linux/rcupdate.h>\n#include <linux/spinlock.h>\n\n'
                       'struct selinux_spoof_ids { u16 cap_c, process_c, binder_c; u32 fsck_t, shell_t, su_t, adbd_t, adbroot_t; struct rcu_head rcu; };\n'
@@ -651,13 +727,19 @@ jobs:
                   serv_content = serv_content.replace(commit_marker, commit_code, 1)
 
                   with open(services_path, "w") as f: f.write(serv_content)
+                  print("✅ services.c -> SPOOFED")
           EOF
+          echo "✅ PYTHON ENGINE SCRIPT EXECUTION SUCCESSFULLY COMPLETE."
 
       - name: Setting up ReSukiSU
         run: |
           cd work/common
+          echo "=== 4. Setting up ReSukiSU ==="
           
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -
+
+          # NOTE: Removed duplicate 'echo' KSU and KPROBES configs to prevent self-heal double-injection.
+          # These are already defined safely in the append_config environment variable.
           
           echo "CONFIG_KSU_SENTINEL=y" >> arch/arm64/configs/gki_defconfig
           
@@ -677,11 +759,21 @@ jobs:
           echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_SUS_SU=y" >> arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n" >> arch/arm64/configs/gki_defconfig
+          echo "✅ ReSukiSU + SuSFS applied successfully!"
 
+          
       - name: Ensuring clean standard audit_fsnotify.c
         run: |
           cd work/common
           cat << 'EOF' > kernel/audit_fsnotify.c
+          // SPDX-License-Identifier: GPL-2.0-or-later
+          /* audit_fsnotify.c -- tracking inodes
+           *
+           * Copyright 2003-2009,2014-2015 Red Hat, Inc.
+           * Copyright 2005 Hewlett-Packard Development Company, L.P.
+           * Copyright 2005 IBM Corporation
+           */
+
           #include <linux/kernel.h>
           #include <linux/audit.h>
           #include <linux/kthread.h>
@@ -867,19 +959,29 @@ jobs:
         run: |
           cd work/common
           
+          echo "=== 5. Absolute Stealth: Dynamic UTS_RELEASE Injection ==="
+          
+          # 1. Makefile se Kernel ka exact Base Version dynamically extract karein
           K_VER=$(grep '^VERSION = ' Makefile | tr -d ' ' | cut -d= -f2)
           K_PATCH=$(grep '^PATCHLEVEL = ' Makefile | tr -d ' ' | cut -d= -f2)
           K_SUB=$(grep '^SUBLEVEL = ' Makefile | tr -d ' ' | cut -d= -f2)
           K_EXTRA=$(grep '^EXTRAVERSION = ' Makefile | tr -d ' ' | cut -d= -f2)
           
+          # 2. Defconfig se default Localversion nikaalein (jaise -android12-9)
           LOCAL_VER="-android12-9"
           
+          # 3. Clean version string merge karein (No '+', No Git commits)
           CURRENT_BUILD_VERSION="${K_VER}.${K_PATCH}.${K_SUB}${K_EXTRA}${LOCAL_VER}"
+          echo "--> Dynamically detected clean version: $CURRENT_BUILD_VERSION"
           
+          # 4. Extract kiye gaye clean version ko seedha C Code mai lock kar dein
           sed -i "s/\.release.*=.*UTS_RELEASE,/.release\t= \"$CURRENT_BUILD_VERSION\",/g" init/version.c
           
+          # 5. Default git tag script ko empty karke block karein (Safety)
           echo "#!/bin/sh" > scripts/setlocalversion
           chmod +x scripts/setlocalversion
+          
+          echo "✅ C Code strictly locked to dynamically detected version: $CURRENT_BUILD_VERSION !"
 
       - name: Setup Neutron Clang 24
         if: ${{ inputs.clang_version == 'neutron clang 24' }}
@@ -898,60 +1000,7 @@ jobs:
           echo "CC=ccache clang" >> $GITHUB_ENV
           echo "CXX=ccache clang++" >> $GITHUB_ENV
           echo "LTO=full" >> $GITHUB_ENV
-
-      - name: Generate LLVM AutoFDO Profile (from simpleperf)
-        run: |
-          echo "=== Fetching Official Simpleperf (Linux x86_64) ==="
-          # Fetch directly from Google's official AOSP mirror on GitHub (100% stable, no 404s)
-          git clone --depth 1 https://github.com/aosp-mirror/platform_prebuilts_simpleperf.git simpleperf_repo
-          SIMPLEPERF="$(pwd)/simpleperf_repo/bin/linux/x86_64/simpleperf"
-          chmod +x $SIMPLEPERF
           
-          echo "=== Downloading & Extracting PGO Data ==="
-          curl -sL "https://www.dropbox.com/scl/fi/193udosv5xvjk0ax90ss6/afdo_package.zip?rlkey=0ypk2sg6t5xjkyimo5qpdlik9&st=bsa61fn5&dl=1" -o afdo_package.zip
-          unzip -o afdo_package.zip -d pgo_workspace/
-          
-          echo "=== Checking vmlinux Status ==="
-          VMLINUX_PATH=$(find pgo_workspace -type f -name "vmlinux" | head -n 1)
-          if [ -z "$VMLINUX_PATH" ]; then echo "❌ Error: vmlinux not found"; exit 1; fi
-          echo "Found Unstripped Kernel Target: $VMLINUX_PATH"
-          
-          echo "=== Generating Profiles Natively using Simpleperf ==="
-          cd pgo_workspace
-          for PERF_FILE in $(find . -maxdepth 1 -type f -name "perf*.data"); do
-             if [ -n "$PERF_FILE" ]; then
-                FILENAME=$(basename -- "$PERF_FILE")
-                BASENAME="${FILENAME%.*}"
-                echo "⏳ Processing $FILENAME..."
-                
-                # Native simpleperf command to inject and directly output AutoFDO profile format
-                $SIMPLEPERF inject -i "$FILENAME" -o "$BASENAME.afdo" --output-format autofdo --symdir . || {
-                    echo "⚠️ Could not parse $FILENAME - skipping."
-                }
-             fi
-          done
-          cd ..
-          
-          echo "=== Merging Profiles for Neutron Clang 24 ==="
-          AFDO_FILES=$(find pgo_workspace -maxdepth 1 -name "*.afdo" -type f -size +0c)
-          if [ -n "$AFDO_FILES" ]; then
-            # MUST include -extbinary for latest Clang compiler standards
-            llvm-profdata merge -sample -extbinary $AFDO_FILES -output="$GITHUB_WORKSPACE/kernel_final.profdata"
-            
-            if [ -f "$GITHUB_WORKSPACE/kernel_final.profdata" ]; then
-                echo "✅ AWESOME! Neutron merged PGO file available at: kernel_final.profdata"
-            else
-                echo "❌ LLVM merge failed silently!"
-                exit 1
-            fi
-          else
-            echo "❌ CRITICAL: No successful AutoFDO (afdo) outputs created!"
-            exit 1
-          fi
-      - name: Inject Polly & Extreme Optimizations
-        run: |
-          echo "KCFLAGS=-O3 -mllvm -polly -mllvm -polly-run-inliner -mllvm -polly-vectorizer=stripmine -fprofile-sample-use=$GITHUB_WORKSPACE/kernel_final.profdata" >> $GITHUB_ENV
-
       - name: Build kernel
         run: |
           chmod +x ./build-kernel.sh
@@ -962,26 +1011,32 @@ jobs:
           BOOT_IMG_URL: "https://www.dropbox.com/scl/fi/l8tfppfqkvvbkgvzjq2me/Evolutionboot.img?rlkey=ww8zq6dvo4pok645gvu85khry&st=3hncwbd1&dl=1"
         shell: bash
         run: |
+          echo "=== 1. Download official STABLE gki toolchain modules ==="
           mkdir -p repack/extracted
           mkdir -p repack/output
           
           git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg repack/mkbootimg_tool
           git clone --depth=1 https://android.googlesource.com/platform/external/avb repack/avb_tool
 
+          echo "--> Pulling ROM stock file dynamically..."
           curl -L "$BOOT_IMG_URL" -o repack/stock_boot.img
 
           PARTITION_SIZE=$(stat -c %s "repack/stock_boot.img")
           if [ "$PARTITION_SIZE" -lt 15000000 ]; then
+             echo "::error:: Corrupt boot image downloaded."
              exit 1
           fi
 
           export IMAGE_PATH="$GITHUB_WORKSPACE/work/dist/Image"
           if [ ! -f "$IMAGE_PATH" ]; then
+             echo "::error:: Compiling GKI raw Image output does not exist!"
              exit 1
           fi
 
+          echo "--> Executing extraction parser step on ROM target..."
           python3 repack/mkbootimg_tool/unpack_bootimg.py --boot_img repack/stock_boot.img --out repack/extracted > repack/extracted/configs.txt
 
+          echo "=== 2. Launch Intelligent Config Python Swapper Engine ==="
           python3 - << 'EOF'
           import sys, os, subprocess
 
@@ -1018,13 +1073,16 @@ jobs:
 
           res = subprocess.run(cmd)
           if res.returncode != 0:
+              print("::error:: mkbootimg repack failed.")
               sys.exit(1)
           EOF
 
           if [ ! -f "repack/output/boot.img" ]; then
+             echo "::error:: Repacked boot image not found."
              exit 1
           fi
 
+          echo "=== 3. Register AVB Signatures ==="
           python3 repack/avb_tool/avbtool.py add_hash_footer \
             --image "repack/output/boot.img" \
             --partition_name boot \
@@ -1033,7 +1091,8 @@ jobs:
             --algorithm SHA256_RSA2048
 
           cp repack/output/boot.img "$GITHUB_WORKSPACE/work/dist/boot.img"
-
+          echo "✅ Final boot.img safely stored!"
+          
       - name: Save ccache cache
         if: ${{ inputs.ccache && always() }}
         uses: actions/cache/save@v4
