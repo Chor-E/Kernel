@@ -901,13 +901,13 @@ jobs:
 
       - name: Generate LLVM AutoFDO Profile (from simpleperf)
         run: |
-          echo "=== Fetching Prebuilt Google AutoFDO Tool (Sparse Checkout) ==="
-          # Use Git Sparse-Checkout to download ONLY the autofdo folder from AOSP natively
-          git clone --depth 1 --filter=blob:none --sparse https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 aosp_clang
-          cd aosp_clang
-          git sparse-checkout set autofdo
-          CREATE_PROF="$(pwd)/autofdo/create_llvm_prof"
-          chmod +x $CREATE_PROF
+          echo "=== Fetching ChromeOS AutoFDO Tool (GitHub Prebuilts) ==="
+          mkdir -p autofdo_tools
+          cd autofdo_tools
+          # Fetch directly from ChromeOS public mirror - extremely stable raw download
+          curl -sL "https://raw.githubusercontent.com/sebanc/brunch-toolchain/master/bin/create_llvm_prof" -o create_llvm_prof
+          chmod +x create_llvm_prof
+          CREATE_PROF="$(pwd)/create_llvm_prof"
           cd ..
           
           echo "=== Downloading & Extracting PGO Data ==="
@@ -926,7 +926,7 @@ jobs:
                 BASENAME="${FILENAME%.*}"
                 echo "⏳ Processing $FILENAME..."
                 $CREATE_PROF --binary="$VMLINUX_PATH" --profile="$PERF_FILE" --out="$BASENAME.afdo" || {
-                    echo "⚠️ Could not parse $FILENAME - please check if its valid."
+                    echo "⚠️ Could not parse $FILENAME - skipping."
                 }
              fi
           done
@@ -947,27 +947,6 @@ jobs:
             echo "❌ CRITICAL: No successful AutoFDO (afdo) outputs created!"
             exit 1
           fi
-          
-          echo "=== Merging Profiles for Neutron Clang 24 ==="
-          # ONLY pickup .afdo files > 0 bytes (removes crashed/empty generated profiles)
-          AFDO_FILES=$(find . -maxdepth 1 -name "*.afdo" -type f -size +0c)
-          
-          if [ -n "$AFDO_FILES" ]; then
-            # MUST include -extbinary for latest Clang compiler standards, or kernel will fail applying PGO later
-            # Replace 'llvm-profdata' command name directly if it needs neutron fullpath path.
-            llvm-profdata merge -sample -extbinary $AFDO_FILES -output="$GITHUB_WORKSPACE/kernel_final.profdata"
-            
-            if [ -f "$GITHUB_WORKSPACE/kernel_final.profdata" ]; then
-                echo "✅ AWESOME! Neutron merged PGO file available at: kernel_final.profdata"
-            else
-                echo "❌ LLVM merge completed but file missing, merge command silently failed!"
-                exit 1
-            fi
-          else
-            echo "❌ CRITICAL: No successful AutoFDO (afdo) outputs created!"
-            exit 1
-          fi
-
       - name: Inject Polly & Extreme Optimizations
         run: |
           echo "KCFLAGS=-O3 -mllvm -polly -mllvm -polly-run-inliner -mllvm -polly-vectorizer=stripmine -fprofile-sample-use=$GITHUB_WORKSPACE/kernel_final.profdata" >> $GITHUB_ENV
