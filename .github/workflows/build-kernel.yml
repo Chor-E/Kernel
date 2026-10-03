@@ -172,12 +172,12 @@ jobs:
           sed -i '/clean_low_ratio/d' mm/Kconfig 2>/dev/null || true
           echo "✅ Hard purge complete!"
 
-      - name: Apply Real LZ4, Swappiness 40 & Force 'none' Scheduler (Advanced Python Engine)
+      - name: Apply Real LZ4, Swappiness 60 & Force 'none' Scheduler (Advanced Python Engine)
         run: |
           cd work/common
 
           echo "=== 1. Real Swappiness Change ==="
-          sed -i 's/vm.swappiness=5/vm.swappiness=40 elevator=none/g' arch/arm64/configs/gki_defconfig
+          sed -i 's/vm.swappiness=5/vm.swappiness=60 elevator=none/g' arch/arm64/configs/gki_defconfig
 
           echo "=== 2. Hardcode Real LZ4 Compressor in Kernel ==="
           echo 'CONFIG_ZRAM_DEF_COMP="lz4"' >> arch/arm64/configs/gki_defconfig
